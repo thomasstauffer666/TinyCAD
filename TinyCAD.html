@@ -33,6 +33,7 @@
         <button data-function="addCylinder">Add Cylinder</button>
         <button data-function="addHexagon">Add Hexagon</button>
         <button data-function="addMetaballs">Add Metaballs</button>
+        <button data-function="addCubes">Add Cubes</button>
         <button data-function="addCSG">Add CSG</button>
         <button data-function="moveX">X+1</button>
     </div>
@@ -190,28 +191,72 @@
         }
 
         function addMetaballs() {
-            const resolution = 28;
-            /*
-            const material = new THREE.MeshStandardMaterial({
-                color: 0xff00ff,
-                metalness: 0.3,
-                roughness: 0.4
+            const material = new THREE.MeshBasicMaterial({
+                color: Math.random() * 0xffffff,
+                side:THREE.DoubleSide,
             });
-            */
-            const material = new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff });
 
-            const metaballs = new MarchingCubes(resolution, material, true);
+            const resolution = 50;
+            const marching = new MarchingCubes(resolution, material, true, true);
+            marching.scale.set(1, 1, 1);
 
-            metaballs.addBall(0, 0, 0, 1, 0); // x, y, z, strength, index
-            metaballs.addBall(1, 0, 0, 1, 1);
-            metaballs.addBall(-1, 0, 0, 1, 2);
-            metaballs.addBall(-1, 0.2, 0, 1, 3);
-            metaballs.update();
+            const positions = [
+                [0.5, 0.5, 0.5],
+                [0.7, 0.5, 0.5],
+                [0.3, 0.6, 0.5],
+                [0.5, 0.4, 0.7],
+                [0.5, 0.7, 0.3],
+            ];
 
-            metaballs.scale.set(50.0, 50.0, 50.0);
+            const strength = 1.0;
+            const subtract = 10;
 
-            scene.add(metaballs);
-            objects.push(metaballs);
+            marching.reset();
+            for (const p of positions) {
+                marching.addBall(p[0], p[1], p[2], strength, subtract);
+            }
+
+            marching.update();
+            scene.add(marching);
+            objects.push(marching);
+        }
+
+        function addCubes() {
+            const material = new THREE.MeshBasicMaterial({
+                color: Math.random() * 0xffffff,
+                side:THREE.DoubleSide,
+            });
+
+            const resolution = 50;
+            const marching = new MarchingCubes(resolution, material, true, true);
+            //marching.isolation = 1; // by default 80
+            marching.scale.set(1, 1, 1);
+
+            const positions = [
+                [0.5, 0.5, 0.5],
+                [0.7, 0.5, 0.5],
+                [0.3, 0.6, 0.5],
+                [0.5, 0.4, 0.7],
+                [0.5, 0.7, 0.3],
+            ];
+
+
+            const size = resolution;
+            const dim = 20;
+            const offset = 15.0; // TODO why this offset?
+            for (let x = 0; x < dim; x += 1) {
+                for (let y = 0; y < dim; y += 1) {
+                    for (let z = 0; z < dim; z += 1) {
+                        marching.setCell(x + offset, y + offset, z + offset, 100);
+                    }
+                }
+            }
+
+            //marching.blur(0.2);
+
+            marching.update();
+            scene.add(marching);
+            objects.push(marching);
         }
 
         function addCSG() {
@@ -274,6 +319,7 @@
             'moveX': moveX,
             'addHexagon': addHexagon,
             'addMetaballs': addMetaballs,
+            'addCubes': addCubes,
             'addCSG': addCSG,
         }
 
