@@ -31,6 +31,7 @@
         <button data-function="addCone">Add Cone</button>
         <button data-function="addTorus">Add Torus</button>
         <button data-function="addCylinder">Add Cylinder</button>
+        <button data-function="addHexagon">Add Hexagon</button>
         <button data-function="moveX">X+1</button>
     </div>
 
@@ -134,6 +135,36 @@
             }
         }
 
+        function extrude2DTo3D(coordinates, height) {
+            const material = new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff });
+            const shape = new THREE.Shape();
+            shape.moveTo(coordinates[0][0], coordinates[0][1]);
+            for (let i = 1; i < coordinates.length; i++) {
+                shape.lineTo(coordinates[i][0], coordinates[i][1]);
+            }
+            shape.lineTo(coordinates[0][0], coordinates[0][1]);
+            const extrudeSettings = {
+                depth: height,
+                bevelEnabled: false
+            };
+            const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+            const mesh = new THREE.Mesh(geometry, material);
+            return mesh;
+        }
+
+        function addHexagon() {
+            const hexagonCoords = [];
+            for (let i = 0; i < 6; i++) {
+                const angle = (i / 6) * Math.PI * 2;
+                hexagonCoords.push([
+                    Math.cos(angle),
+                    Math.sin(angle)
+                ]);
+            }
+            const mesh = extrude2DTo3D(hexagonCoords, 3);
+            scene.add(mesh);
+        }
+
         // Camera
 
         camera.position.set(5.0, 5.0, 5.0);
@@ -164,6 +195,7 @@
             'addTorus': addTorus,
             'addCylinder': addCylinder,
             'moveX': moveX,
+            'addHexagon': addHexagon,
         }
 
         document.querySelectorAll('button[data-function]').forEach(button => {
@@ -186,6 +218,8 @@
 
             if (intersects.length > 0) {
                 selectedObject = intersects[0].object;
+                selectedObject.material.transparent = true;
+                selectedObject.material.opacity = 0.5;
                 console.log('Selected object position:', selectedObject);
             }
         }
