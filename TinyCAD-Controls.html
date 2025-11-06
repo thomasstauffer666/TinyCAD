@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TinyCAD: Screenshot Ready</title>
+    <style>
+        body { margin: 0; font-family: sans-serif; overflow: hidden; background: #eef4f8; }
+        #ui-container {
+            position: absolute; top: 10px; left: 10px; pointer-events: none;
+            display: flex; flex-direction: column; gap: 8px; max-height: 95vh; overflow-y: auto;
+            width: 220px;
+        }
+        #ui-container::-webkit-scrollbar { width: 4px; }
+        #ui-container::-webkit-scrollbar-thumb { background-color: rgba(0,0,0,0.2); border-radius: 2px; }
+
+        .panel {
+            background-color: rgba(238, 238, 238, 0.95); padding: 10px;
+            border-radius: 8px; pointer-events: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            backdrop-filter: blur(5px); transition: opacity 0.2s;
+        }
+        .panel.hidden { display: none; }
+        .panel-label {
+            font-size: 11px; text-transform: uppercase; color: #666; margin-bottom: 6px; font-weight: 700; border-bottom: 1px solid #ddd; padding-bottom: 2px;
+        }
+        .button-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-bottom: 8px; }
+        button {
+            height: 26px; cursor: pointer; border: 1px solid #ccc; background: #fff;
+            border-radius: 4px; font-size: 11px; color: #333;
+        }
+        button:hover { background: #f5f5f5; border-color: #999; }
+        button.active { background: #333; color: white; border-color: #000; }
+        /* Special style for the screenshot button */
+        #btn-screenshot { background: #e3f2fd; border-color: #2196f3; color: #0d47a1; font-weight: bold; }
+        #btn-screenshot:hover { background: #bbdefb; }
+
+        .control-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 11px; }
+        .control-row label { width: 60px; font-weight: bold; }
+        input[type="range"] { flex-grow: 1; cursor: pointer; }
+        input[type="color"] { flex-grow: 1; height: 28px; border: none; padding: 0; background: transparent; cursor: pointer; }
+        .val-display { width: 25px; text-align: right; color: #666; }
+    </style>
+</head>
+<body>
+    <div id="ui-container">
+        <div class="panel">
+            <div class="panel-label">Project</div>
+            <div class="button-grid" style="grid-template-columns: 1fr;">
+                <button id="btn-screenshot" onclick="saveScreenshot()">📸 Save as Image</button>
+            </div>
+        </div>
+
+        <div class="panel control-row">
+            <strong>Color</strong>
+            <input type="color" id="color-picker" value="#3498db">
+        </div>
+
+        <div id="super-panel" class="panel hidden" style="background-color: #e8f4fc; border-left: 4px solid #3498db;">
+             <div class="panel-label" style="color: #3498db;">Super Props 🌟</div>
+             <div class="control-row">
+                 <label>M (Spikes)</label><input type="range" id="super-m" min="0" max="20" step="0.5" value="0">
+                 <span id="val-m" class="val-display">0</span>
+             </div>
+             <div class="control-row">
+                 <label>N1 (Bloat)</label><input type="range" id="super-n1" min="0.1" max="10" step="0.1" value="1">
+                 <span id="val-n1" class="val-display">1</span>
+             </div>
+             <div class="control-row">
+                 <label>N2 (Shape)</label><input type="range" id="super-n2" min="0.1" max="10" step="0.1" value="1">
+                 <span id="val-n2" class="val-display">1</span>
+             </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-label">Add Objects</div>
+            <div class="button-grid">
+                <button data-add="Cube">Cube</button>
+                <button data-add="Sphere">Sphere</button>
+                <button data-add="Cylindr">Cylind</button>
+            </div>
+            <div class="panel-label" style="margin-top: 4px;">Supershapes 🌟</div>
+            <div class="button-grid">
+                 <button data-add="SuperToroid">Toroid</button>
+                 <button data-add="SuperStar">Star</button>
+                 <button data-add="SuperBlob">Blob</button>
+            </div>
+            <div class="panel-label" style="margin-top: 4px;">Models</div>
+            <div class="button-grid">
+                <button data-add="Car">🚗 Car</button>
+                <button data-add="Robot">🤖 Bot</button>
+                <button data-add="Tree">🌲 Tree</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="button-grid">
+                <button id="btn-translate" class="active" onclick="setMode('translate')">Move</button>
+                <button id="btn-rotate" onclick="setMode('rotate')">Rotate</button>
+                <button id="btn-scale" onclick="setMode('scale')">Scale</button>
+            </div>
+            <div style="text-align: center; font-size: 10px; color: #888; margin-top: 5px;">
+                [DEL] to delete object
+            </div>
+        </div>
+    </div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
+        // --- INIT SCENE ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xeef4f8);
+        scene.fog = new THREE.Fog(0xeef4f8, 20, 60);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        camera.position.set(5, 5, 8);
+        
+        // WICHTIG: preserveDrawingBuffer erlaubt Screenshots
+        const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        // --- SCREENSHOT FUNCTION ---
+        // Diese Funktion wird global verfügbar gemacht, damit der HTML-Button sie findet
+        window.saveScreenshot = () => {
+            // Gizmos kurz verstecken für einen sauberen Screenshot
+            if (tControls) tControls.detach();
+            
+            // Einmal rendern, um sicherzustellen, dass der Buffer aktuell ist
+            renderer.render(scene, camera);
+            
+            // Bild erzeugen und herunterladen
+            const link = document.createElement('a');
+            // Dateiname mit Zeitstempel generieren
+            const date = new Date().toISOString().slice(0,19).replace(/:/g,"-");
+            link.download = `tinycad_${date}.png`;
+            link.href = renderer.domElement.toDataURL('image/png');
+            link.click();
+
+            // Auswahl wiederherstellen falls vorhanden
+            if (selectedObj) select(selectedObj);
+        };
+
+        // --- LIGHTS & ENVIRONMENT ---
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(5, 15, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.set(2048, 2048);
+        scene.add(dirLight);
+        const gridHelper = new THREE.GridHelper(30, 30, 0x888888, 0xdddddd);
+        scene.add(gridHelper);
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(100,100), new THREE.ShadowMaterial({opacity:0.15}));
+        ground.rotation.x=-Math.PI/2; ground.receiveShadow=true; ground.position.y=-0.01; scene.add(ground);
+
+        // --- CONTROLS ---
+        const orbit = new OrbitControls(camera, renderer.domElement);
+        orbit.enableDamping = true;
+        const tControls = new TransformControls(camera, renderer.domElement);
+        tControls.addEventListener('dragging-changed', e => orbit.enabled = !e.value);
+        scene.add(tControls);
+
+        // --- STATE ---
+        let objects = [], selectedObj = null;
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        
+        // UI Elements
+        const colorPicker = document.getElementById('color-picker');
+        const superPanel = document.getElementById('super-panel');
+        const sliders = {
+            m: document.getElementById('super-m'),
+            n1: document.getElementById('super-n1'),
+            n2: document.getElementById('super-n2')
+        };
+        const displays = {
+            m: document.getElementById('val-m'),
+            n1: document.getElementById('val-n1'),
+            n2: document.getElementById('val-n2')
+        };
+
+        // --- SUPERFORMULA & GEOMETRY ---
+        function sf(phi, m, n1, n2, n3, a=1, b=1) {
+            return Math.pow(Math.pow(Math.abs(Math.cos(m*phi/4)/a), n2) + Math.pow(Math.abs(Math.sin(m*phi/4)/b), n3), -1/n1);
+        }
+        function generateSuperGeometry(params) {
+            const geo = new THREE.SphereGeometry(1, 96, 96);
+            const pos = geo.attributes.position; const v = new THREE.Vector3();
+            for(let i=0; i<pos.count; i++){
+                v.fromBufferAttribute(pos, i).normalize();
+                const phi = Math.asin(v.y), theta = Math.atan2(v.z, v.x);
+                const r1 = sf(theta, params.m, params.n1, params.n2, params.n2);
+                const r2 = sf(phi, params.m, params.n1, params.n2, params.n2);
+                v.multiplyScalar(r1 * r2 * 0.5); pos.setXYZ(i, v.x, v.y, v.z);
+            }
+            geo.computeVertexNormals(); return geo;
+        }
+        function updateSelectedSuperShape() {
+            if(!selectedObj || !selectedObj.userData.isSuper) return;
+            const p = { m: parseFloat(sliders.m.value), n1: parseFloat(sliders.n1.value), n2: parseFloat(sliders.n2.value) };
+            displays.m.textContent=p.m; displays.n1.textContent=p.n1; displays.n2.textContent=p.n2;
+            selectedObj.geometry.dispose(); selectedObj.geometry = generateSuperGeometry(p); selectedObj.userData.superParams = p;
+        }
+
+        // --- FACTORIES ---
+        const mat = (c=colorPicker.value) => new THREE.MeshStandardMaterial({color:c, metalness:0.3, roughness:0.5, side:THREE.DoubleSide});
+        const shadow = (m) => { m.castShadow=true; m.receiveShadow=true; return m; }
+        const factories = {
+            'Cube': () => new THREE.BoxGeometry(1,1,1),
+            'Sphere': () => new THREE.SphereGeometry(0.5,32,32),
+            'Cylindr': () => new THREE.CylinderGeometry(0.5,0.5,1,32),
+            'SuperToroid': () => ({ isSuper:true, params:{m:4, n1:10, n2:10} }),
+            'SuperStar': () => ({ isSuper:true, params:{m:12, n1:0.5, n2:1.7} }),
+            'SuperBlob': () => ({ isSuper:true, params:{m:5, n1:2, n2:6} }),
+            'Car': () => {
+                const g=new THREE.Group(), m=mat(), b=mat(0x333333);
+                g.add(shadow(new THREE.Mesh(new THREE.BoxGeometry(2,.5,1),m)).translateY(.5));
+                g.add(shadow(new THREE.Mesh(new THREE.BoxGeometry(1,.4,.8),m)).translateY(.95).translateX(-.15));
+                [[-.6,.4],[.6,.4],[-.6,-.4],[.6,-.4]].forEach(p=>g.add(shadow(new THREE.Mesh(new THREE.CylinderGeometry(.3,.3,.2,16),b)).rotateX(Math.PI/2).setPosition(p[0],.3,p[1])));
+                return g;
+            },
+            'Robot': () => {
+                const g=new THREE.Group(), m=mat(), mg=mat(0xaaaaaa);
+                g.add(shadow(new THREE.Mesh(new THREE.BoxGeometry(1,1.2,.8),m)).translateY(1.4));
+                g.add(shadow(new THREE.Mesh(new THREE.BoxGeometry(.6,.6,.6),m)).translateY(2.4));
+                [[-.3,.4],[.3,.4]].forEach(p=>g.add(shadow(new THREE.Mesh(new THREE.CylinderGeometry(.15,.15,.8),mg)).setPosition(p[0],p[1],0)));
+                return g;
+            },
+            'Tree': () => {
+                const g=new THREE.Group();
+                g.add(shadow(new THREE.Mesh(new THREE.CylinderGeometry(.2,.3,1,8),mat(0x8B4513))).translateY(.5));
+                g.add(shadow(new THREE.Mesh(new THREE.ConeGeometry(1.2,2.5,8),mat(0x2ecc71))).translateY(2));
+                return g;
+            }
+        };
+
+        function addObject(type) {
+            if(!factories[type]) return;
+            let obj, data = factories[type]();
+            if(data.isSuper) { obj=new THREE.Mesh(generateSuperGeometry(data.params), mat()); obj.userData.isSuper=true; obj.userData.superParams=data.params; }
+            else if(data instanceof THREE.Group) obj=data;
+            else obj=new THREE.Mesh(data, mat());
+            shadow(obj);
+            const box=new THREE.Box3().setFromObject(obj); obj.position.y=-box.min.y;
+            scene.add(obj); objects.push(obj); select(obj);
+        }
+
+        // --- INTERACTION ---
+        function select(obj) {
+            selectedObj = obj;
+            if(obj) {
+                tControls.attach(obj);
+                let m; obj.traverse(c=>{if(c.isMesh && !m) m=c.material;});
+                if(m && m.color) colorPicker.value='#'+m.color.getHexString();
+                if(obj.userData.isSuper) {
+                    superPanel.classList.remove('hidden');
+                    sliders.m.value=obj.userData.superParams.m; sliders.n1.value=obj.userData.superParams.n1; sliders.n2.value=obj.userData.superParams.n2;
+                    updateSelectedSuperShape();
+                } else superPanel.classList.add('hidden');
+            } else { tControls.detach(); superPanel.classList.add('hidden'); }
+        }
+
+        Object.values(sliders).forEach(s => s.addEventListener('input', updateSelectedSuperShape));
+        colorPicker.addEventListener('input', e => { if(selectedObj) selectedObj.traverse(c=>{if(c.isMesh)c.material.color.set(e.target.value)}); });
+        document.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => addObject(b.dataset.add)));
+        window.setMode = m => { tControls.setMode(m); document.querySelectorAll('.panel:last-child button').forEach(b=>b.classList.remove('active')); document.getElementById('btn-'+m).classList.add('active'); };
+        renderer.domElement.addEventListener('pointerdown', e => {
+            if(e.button!==0) return;
+            mouse.x=(e.clientX/window.innerWidth)*2-1; mouse.y=-(e.clientY/window.innerHeight)*2+1;
+            raycaster.setFromCamera(mouse, camera);
+            const ints = raycaster.intersectObjects(objects, true);
+            if(ints.length) { let t=ints[0].object; while(t.parent && !objects.includes(t)) t=t.parent; select(objects.includes(t)?t:null); } else select(null);
+        });
+        window.addEventListener('keydown', e => {
+            if(e.target.tagName==='INPUT')return;
+            switch(e.key.toLowerCase()){
+                case 't': setMode('translate');break; case 'r': setMode('rotate');break; case 's': setMode('scale');break;
+                case 'delete':case 'backspace': if(selectedObj){scene.remove(selectedObj); objects=objects.filter(o=>o!==selectedObj); select(null);} break;
+            }
+        });
+        window.addEventListener('resize', () => { camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth,window.innerHeight); });
+        function animate() { requestAnimationFrame(animate); orbit.update(); renderer.render(scene, camera); }
+        animate();
+    </script>
+</body>
+</html>
