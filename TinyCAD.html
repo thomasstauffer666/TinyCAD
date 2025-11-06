@@ -136,7 +136,9 @@
         }
 
         function extrude2DTo3D(coordinates, height) {
-            const material = new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff });
+            const material = new THREE.MeshBasicMaterial({
+                 color: Math.random() * 0xffffff
+            });
             const shape = new THREE.Shape();
             shape.moveTo(coordinates[0][0], coordinates[0][1]);
             for (let i = 1; i < coordinates.length; i++) {
@@ -162,6 +164,7 @@
                 ]);
             }
             const mesh = extrude2DTo3D(hexagonCoords, 3);
+            objects.push(mesh);
             scene.add(mesh);
         }
 
