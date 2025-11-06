@@ -11,7 +11,7 @@
         canvas {
             display: block;
         }
-        #controls {
+        #menu {
             position: relative;
             top: 10px;
             left: 10px;
@@ -25,7 +25,7 @@
     </style>
 </head>
 <body>
-    <div id="controls">
+    <div id="menu">
         <button data-function="addSphere">Add Sphere</button>
         <button data-function="addCube">Add Cube</button>
         <button data-function="addCone">Add Cone</button>
@@ -55,28 +55,54 @@
         import { MarchingCubes } from 'three/addons/objects/MarchingCubes.js';
         import { Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg';
 
-        const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+
         const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.shadowMap.enabled = true;
+        //renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.setClearColor(0xffffff);
+
+        const scene = new THREE.Scene();
+
         const raycaster = new THREE.Raycaster();
 
-        renderer.setClearColor(0xffffff);
         document.body.appendChild(renderer.domElement);
 
         const objects = [];
         let selectedObject = null;
 
+        // Lights
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        directionalLight.position.set(10.0, 10.0, 10.0);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.set(2048, 2048);
+        scene.add(directionalLight);
+
+        // Ground
+
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(10.0, 10.0), new THREE.ShadowMaterial({opacity:0.15}));
+        ground.rotation.x = -Math.PI/2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
         // Grid
 
-        const gridSize = 2;
-        const gridDivisions = 20;
+        const gridSize = 4;
+        const gridDivisions = 40;
         const gridHelper = new THREE.GridHelper(gridSize, gridDivisions, 0x333333, 0xcccccc);
         scene.add(gridHelper);
 
         // X/Y/Z-Axis
 
         function createLine(color, start, end) {
-            const material = new THREE.LineBasicMaterial({ color: color });
+            const material = new THREE.LineBasicMaterial({
+                color: color,
+                //depthTest: false,
+            });
             const geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
             const line = new THREE.Line(geometry, material);
             return line;
@@ -93,61 +119,61 @@
         const zAxis = createLine(0x0000ff, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, axisLength));
         scene.add(zAxis);
 
-        function addSphere() {
-            const geometry = new THREE.SphereGeometry(1, 32, 32);
-            const material = new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff });
-            const mesh = new THREE.Mesh(geometry, material);
-            mesh.name = 'Sphere';
+        function createRandomMaterial() {
+            const material = new THREE.MeshStandardMaterial({
+                color: Math.random() * 0xffffff,
+                metalness: 0.3,
+                roughness: 0.4,
+                side: THREE.DoubleSide,
+            });
+            return material;
+        }
+
+        function addMesh(mesh) {
+            mesh.castShadow = true;
+            //mesh.receiveShadow = true;
             scene.add(mesh);
             objects.push(mesh);
+        }
+
+        function addSphere() {
+            const geometry = new THREE.SphereGeometry(1, 32, 32);
+            const material = createRandomMaterial();
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.name = 'Sphere';
+            addMesh(mesh);
         }
 
         function addCube() {
             const geometry = new THREE.BoxGeometry(1.0, 1.0, 1.0);
-            const material = new THREE.MeshBasicMaterial({
-                color: Math.random() * 0xffffff,
-                side: THREE.DoubleSide,
-            });
+            const material = createRandomMaterial();
             const mesh = new THREE.Mesh(geometry, material);
             mesh.name = 'Cube';
-            scene.add(mesh);
-            objects.push(mesh);
+            addMesh(mesh);
         }
 
         function addCone() {
             const geometry = new THREE.ConeGeometry(0.5, 1, 32);
-            const material = new THREE.MeshBasicMaterial({
-                color: Math.random() * 0xffffff,
-                side: THREE.DoubleSide,
-            });
+            const material = createRandomMaterial();
             const mesh = new THREE.Mesh(geometry, material);
             mesh.name = 'Cone';
-            scene.add(mesh);
-            objects.push(mesh);
+            addMesh(mesh);
         }
 
         function addTorus() {
             const geometry = new THREE.TorusGeometry(1, 0.4, 16, 100);
-            const material = new THREE.MeshBasicMaterial({
-                color: Math.random() * 0xffffff,
-                side: THREE.DoubleSide,
-            });
+            const material = createRandomMaterial();
             const mesh = new THREE.Mesh(geometry, material);
             mesh.name = 'Torus';
-            scene.add(mesh);
-            objects.push(mesh);
+            addMesh(mesh);
         }
 
         function addCylinder() {
             const geometry = new THREE.CylinderGeometry(0.5, 0.5, 1, 32);
-            const material = new THREE.MeshBasicMaterial({
-                color: Math.random() * 0xffffff,
-                side: THREE.DoubleSide,
-            });
+            const material = createRandomMaterial();
             const mesh = new THREE.Mesh(geometry, material);
             mesh.name = 'Cylinder';
-            scene.add(mesh);
-            objects.push(mesh);
+            addMesh(mesh);
         }
 
         function moveX() {
@@ -157,16 +183,13 @@
         }
 
         function extrude2DTo3D(coordinates, height) {
-            const material = new THREE.MeshBasicMaterial({
-                color: Math.random() * 0xffffff,
-                side: THREE.DoubleSide,
-            });
+            const material = createRandomMaterial();
             const shape = new THREE.Shape();
-            shape.moveTo(coordinates[0][0], coordinates[0][1]);
+            shape.moveTo(coordinates[0].x, coordinates[0].y);
             for (let i = 1; i < coordinates.length; i++) {
-                shape.lineTo(coordinates[i][0], coordinates[i][1]);
+                shape.lineTo(coordinates[i].x, coordinates[i].y);
             }
-            shape.lineTo(coordinates[0][0], coordinates[0][1]);
+            shape.lineTo(coordinates[0].x, coordinates[0].y);
             const extrudeSettings = {
                 depth: height,
                 bevelEnabled: false
@@ -177,24 +200,21 @@
         }
 
         function addHexagon() {
-            const hexagonCoords = [];
+            const radius = 0.5;
+            const coords = [];
             for (let i = 0; i < 6; i++) {
-                const angle = (i / 6) * Math.PI * 2;
-                hexagonCoords.push([
-                    Math.cos(angle),
-                    Math.sin(angle)
-                ]);
+                const angle = (i / 6) * Math.PI * 2.0;
+                coords.push({
+                    x: Math.cos(angle) * radius,
+                    y: Math.sin(angle) * radius,
+                });
             }
-            const mesh = extrude2DTo3D(hexagonCoords, 3);
-            objects.push(mesh);
-            scene.add(mesh);
+            const mesh = extrude2DTo3D(coords, 1.0);
+            addMesh(mesh);
         }
 
         function addMetaballs() {
-            const material = new THREE.MeshBasicMaterial({
-                color: Math.random() * 0xffffff,
-                side:THREE.DoubleSide,
-            });
+            const material = createRandomMaterial();
 
             const resolution = 50;
             const marching = new MarchingCubes(resolution, material, true, true);
@@ -217,29 +237,16 @@
             }
 
             marching.update();
-            scene.add(marching);
-            objects.push(marching);
+            addMesh(marching);
         }
 
         function addCubes() {
-            const material = new THREE.MeshBasicMaterial({
-                color: Math.random() * 0xffffff,
-                side:THREE.DoubleSide,
-            });
+            const material = createRandomMaterial();
 
             const resolution = 50;
             const marching = new MarchingCubes(resolution, material, true, true);
             //marching.isolation = 1; // by default 80
             marching.scale.set(1, 1, 1);
-
-            const positions = [
-                [0.5, 0.5, 0.5],
-                [0.7, 0.5, 0.5],
-                [0.3, 0.6, 0.5],
-                [0.5, 0.4, 0.7],
-                [0.5, 0.7, 0.3],
-            ];
-
 
             const size = resolution;
             const dim = 20;
@@ -255,25 +262,18 @@
             //marching.blur(0.2);
 
             marching.update();
-            scene.add(marching);
-            objects.push(marching);
+            addMesh(marching);
         }
 
         function addCSG() {
             const geometry1 = new THREE.CylinderGeometry(0.5, 0.5, 1, 32);
-            const material1 = new THREE.MeshBasicMaterial({
-                color: Math.random() * 0xffffff,
-                side:THREE.DoubleSide,
-            });
+            const material1 = createRandomMaterial();
             const mesh1 = new THREE.Mesh(geometry1, material1);
             mesh1.position.x = 0.2;
             //scene.add(mesh1);
 
             const geometry2 = new THREE.ConeGeometry(0.5, 1, 32);
-            const material2 = new THREE.MeshBasicMaterial({
-                color: Math.random() * 0xffffff,
-                side:THREE.DoubleSide,
-            });
+            const material2 = createRandomMaterial();
             const mesh2 = new THREE.Mesh(geometry2, material2);
             //scene.add(mesh2);
 
@@ -343,8 +343,8 @@
 
             if (intersects.length > 0) {
                 selectedObject = intersects[0].object;
-                selectedObject.material.transparent = true;
-                selectedObject.material.opacity = 0.5;
+                //selectedObject.material.transparent = true;
+                //selectedObject.material.opacity = 0.5;
                 console.log('Selected object position:', selectedObject);
             }
         }
