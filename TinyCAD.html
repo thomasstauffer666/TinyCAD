@@ -67,7 +67,7 @@
 
         // Grid
 
-        const gridSize = 20;
+        const gridSize = 2;
         const gridDivisions = 20;
         const gridHelper = new THREE.GridHelper(gridSize, gridDivisions, 0x333333, 0xcccccc);
         scene.add(gridHelper);
@@ -81,13 +81,15 @@
             return line;
         }
 
-        const xAxis = createLine(0xff0000, new THREE.Vector3(0, 0, 0), new THREE.Vector3(5, 0, 0));
+        const axisLength = 1.0;
+
+        const xAxis = createLine(0xff0000, new THREE.Vector3(0, 0, 0), new THREE.Vector3(axisLength, 0, 0));
         scene.add(xAxis);
 
-        const yAxis = createLine(0x00ff00, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 5, 0));
+        const yAxis = createLine(0x00ff00, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, axisLength, 0));
         scene.add(yAxis);
 
-        const zAxis = createLine(0x0000ff, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 5));
+        const zAxis = createLine(0x0000ff, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, axisLength));
         scene.add(zAxis);
 
         function addSphere() {
@@ -100,8 +102,11 @@
         }
 
         function addCube() {
-            const geometry = new THREE.BoxGeometry(1, 1, 1);
-            const material = new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff });
+            const geometry = new THREE.BoxGeometry(1.0, 1.0, 1.0);
+            const material = new THREE.MeshBasicMaterial({
+                color: Math.random() * 0xffffff,
+                side: THREE.DoubleSide,
+            });
             const mesh = new THREE.Mesh(geometry, material);
             mesh.name = 'Cube';
             scene.add(mesh);
@@ -110,7 +115,10 @@
 
         function addCone() {
             const geometry = new THREE.ConeGeometry(0.5, 1, 32);
-            const material = new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff });
+            const material = new THREE.MeshBasicMaterial({
+                color: Math.random() * 0xffffff,
+                side: THREE.DoubleSide,
+            });
             const mesh = new THREE.Mesh(geometry, material);
             mesh.name = 'Cone';
             scene.add(mesh);
@@ -119,7 +127,10 @@
 
         function addTorus() {
             const geometry = new THREE.TorusGeometry(1, 0.4, 16, 100);
-            const material = new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff });
+            const material = new THREE.MeshBasicMaterial({
+                color: Math.random() * 0xffffff,
+                side: THREE.DoubleSide,
+            });
             const mesh = new THREE.Mesh(geometry, material);
             mesh.name = 'Torus';
             scene.add(mesh);
@@ -128,7 +139,10 @@
 
         function addCylinder() {
             const geometry = new THREE.CylinderGeometry(0.5, 0.5, 1, 32);
-            const material = new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff });
+            const material = new THREE.MeshBasicMaterial({
+                color: Math.random() * 0xffffff,
+                side: THREE.DoubleSide,
+            });
             const mesh = new THREE.Mesh(geometry, material);
             mesh.name = 'Cylinder';
             scene.add(mesh);
@@ -143,7 +157,8 @@
 
         function extrude2DTo3D(coordinates, height) {
             const material = new THREE.MeshBasicMaterial({
-                 color: Math.random() * 0xffffff
+                color: Math.random() * 0xffffff,
+                side: THREE.DoubleSide,
             });
             const shape = new THREE.Shape();
             shape.moveTo(coordinates[0][0], coordinates[0][1]);
@@ -201,13 +216,19 @@
 
         function addCSG() {
             const geometry1 = new THREE.CylinderGeometry(0.5, 0.5, 1, 32);
-            const material1 = new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff });
+            const material1 = new THREE.MeshBasicMaterial({
+                color: Math.random() * 0xffffff,
+                side:THREE.DoubleSide,
+            });
             const mesh1 = new THREE.Mesh(geometry1, material1);
             mesh1.position.x = 0.2;
             //scene.add(mesh1);
 
             const geometry2 = new THREE.ConeGeometry(0.5, 1, 32);
-            const material2 = new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff });
+            const material2 = new THREE.MeshBasicMaterial({
+                color: Math.random() * 0xffffff,
+                side:THREE.DoubleSide,
+            });
             const mesh2 = new THREE.Mesh(geometry2, material2);
             //scene.add(mesh2);
 
@@ -223,7 +244,7 @@
 
         // Camera
 
-        camera.position.set(5.0, 5.0, 5.0);
+        camera.position.set(1.0, 1.0, 1.0);
 
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
