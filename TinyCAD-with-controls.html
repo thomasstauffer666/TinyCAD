@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TinyCAD Improved</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: sans-serif;
+            overflow: hidden; /* Verhindert Scrollbalken bei kleinen Fenstern */
+        }
+        canvas {
+            display: block;
+        }
+        #ui-container {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            pointer-events: none; /* Klicks gehen durch den Container durch, wenn nicht auf Buttons */
+        }
+        #controls, #info {
+            background-color: rgba(238, 238, 238, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            pointer-events: auto; /* Buttons wieder klickbar machen */
+            margin-bottom: 10px;
+        }
+        button {
+            height: 30px;
+            margin-right: 5px;
+            cursor: pointer;
+        }
+        .hint {
+            font-size: 12px;
+            color: #333;
+            margin-top: 5px;
+        }
+        kbd {
+            background-color: #eee;
+            border-radius: 3px;
+            border: 1px solid #b4b4b4;
+            box-shadow: 0 1px 1px rgba(0,0,0,.2), 0 2px 0 0 rgba(255,255,255,.7) inset;
+            color: #333;
+            display: inline-block;
+            font-size: .85em;
+            font-weight: 700;
+            line-height: 1;
+            padding: 2px 4px;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui-container">
+        <div id="controls">
+            <strong>Add Objects:</strong><br>
+            <button data-function="addSphere">Sphere</button>
+            <button data-function="addCube">Cube</button>
+            <button data-function="addCone">Cone</button>
+            <button data-function="addTorus">Torus</button>
+            <button data-function="addCylinder">Cylinder</button>
+        </div>
+        <div id="info">
+            <strong>Controls:</strong>
+            <div class="hint"><kbd>Left Click</kbd> Select Object</div>
+            <div class="hint"><kbd>T</kbd> Move (Translate)</div>
+            <div class="hint"><kbd>R</kbd> Rotate</div>
+            <div class="hint"><kbd>S</kbd> Scale</div>
+            <div class="hint"><kbd>Del</kbd> Delete Object</div>
+            <div class="hint"><kbd>+</kbd> / <kbd>-</kbd> Make Gizmo bigger/smaller</div>
+        </div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        // WICHTIG: TransformControls importieren
+        import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        const raycaster = new THREE.Raycaster();
+
+        renderer.setClearColor(0xf0f0f0); // Etwas hellerer Hintergrund
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        let objects = []; // 'let' statt 'const', damit wir filtern können beim Löschen
+        let selectedObject = null;
+
+        // Grid
+        const gridHelper = new THREE.GridHelper(20, 20, 0x888888, 0xdddddd);
+        scene.add(gridHelper);
+
+        // Lighting (Besseres Licht hilft bei 3D Wahrnehmung)
+        const ambientLight = new THREE.AmbientLight(0x505050);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(5, 10, 7.5);
+        scene.add(directionalLight);
+
+        // Camera initial position
+        camera.position.set(5.0, 5.0, 5.0);
+
+        // Orbit Controls (Kamera-Bewegung)
+        const orbitControls = new OrbitControls(camera, renderer.domElement);
+        orbitControls.enableDamping = true;
+        orbitControls.dampingFactor = 0.05;
+
+        // --- NEU: Transform Controls (Objekt-Manipulation) ---
+        const transformControls = new TransformControls(camera, renderer.domElement);
+        scene.add(transformControls);
+
+        // Wichtig: Wenn wir am Objekt ziehen, darf sich die Kamera nicht drehen
+        transformControls.addEventListener('dragging-changed', function (event) {
+            orbitControls.enabled = !event.value;
+        });
+
+        // Event Listener für Tasten (T, R, S, Delete, +/-)
+        window.addEventListener('keydown', function (event) {
+            switch (event.key.toLowerCase()) {
+                case 't': // Translate
+                    transformControls.setMode('translate');
+                    break;
+                case 'r': // Rotate
+                    transformControls.setMode('rotate');
+                    break;
+                case 's': // Scale
+                    transformControls.setMode('scale');
+                    break;
+                case 'delete': // Entf-Taste
+                case 'backspace':
+                    deleteSelectedObject();
+                    break;
+                case '+': // Gizmo vergrößern
+                    transformControls.setSize(transformControls.size + 0.1);
+                    break;
+                case '-': // Gizmo verkleinern
+                    transformControls.setSize(Math.max(transformControls.size - 0.1, 0.1));
+                    break;
+            }
+        });
+
+        // --- Objekt Erstellung ---
+
+        // Hilfsfunktion für zufällige Farben und bessere Materialien
+        function getRandomMaterial() {
+             return new THREE.MeshStandardMaterial({ 
+                color: Math.random() * 0xffffff,
+                metalness: 0.1,
+                roughness: 0.5
+            });
+        }
+
+        function addObject(geometry, name) {
+            const material = getRandomMaterial();
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.name = name;
+            // Objekte leicht erhöht spawnen, damit sie auf dem Gitter stehen und nicht darin
+            mesh.position.y = 0.5; 
+            scene.add(mesh);
+            objects.push(mesh);
+            // Neues Objekt direkt auswählen
+            selectObject(mesh);
+        }
+
+        const functions = {
+            'addSphere': () => addObject(new THREE.SphereGeometry(0.5, 32, 32), 'Sphere'),
+            'addCube': () => addObject(new THREE.BoxGeometry(1, 1, 1), 'Cube'),
+            'addCone': () => addObject(new THREE.ConeGeometry(0.5, 1, 32), 'Cone'),
+            'addTorus': () => addObject(new THREE.TorusGeometry(0.5, 0.2, 16, 100), 'Torus'),
+            'addCylinder': () => addObject(new THREE.CylinderGeometry(0.5, 0.5, 1, 32), 'Cylinder'),
+        };
+
+        document.querySelectorAll('button[data-function]').forEach(button => {
+            button.addEventListener('click', (e) => {
+                e.stopPropagation(); // Verhindert, dass der Klick auf den Button auch einen Klick in die Szene auslöst
+                const func = button.getAttribute('data-function');
+                if (functions[func]) functions[func]();
+            });
+        });
+
+        // --- Auswahl Logik ---
+
+        function selectObject(object) {
+            selectedObject = object;
+            if (object) {
+                transformControls.attach(object);
+                console.log('Selected:', object.name);
+            } else {
+                transformControls.detach();
+                console.log('Deselected');
+            }
+        }
+
+        function deleteSelectedObject() {
+            if (!selectedObject) return;
+            
+            scene.remove(selectedObject);
+            // Aus dem objects Array entfernen
+            objects = objects.filter(obj => obj !== selectedObject);
+            
+            // Wichtig: Speicher freigeben (gute Praxis in Three.js)
+            if (selectedObject.geometry) selectedObject.geometry.dispose();
+            if (selectedObject.material) selectedObject.material.dispose();
+
+            selectObject(null); // Auswahl aufheben
+        }
+
+        function onMouseClick(event) {
+            // Nur Linksklick (button 0) beachten
+            if (event.button !== 0) return;
+
+            // Berechne Mausposition im normalisierten Gerätekoordinatensystem (-1 bis +1)
+            const mouse = new THREE.Vector2();
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(objects, false);
+
+            if (intersects.length > 0) {
+                selectObject(intersects[0].object);
+            } else {
+                // Klick ins Leere hebt Auswahl auf
+                selectObject(null);
+            }
+        }
+
+        // 'pointerdown' ist oft besser als 'click', da es schneller reagiert 
+        // und Konflikte mit OrbitControls Dragging vermeidet.
+        renderer.domElement.addEventListener('pointerdown', onMouseClick);
+
+        // --- Standard Three.js Zeug ---
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            orbitControls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
