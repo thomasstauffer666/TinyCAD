@@ -310,24 +310,24 @@
 
         // UI
 
-        const functions = {
-            'addSphere': addSphere,
-            'addCube': addCube,
-            'addCone': addCone,
-            'addTorus': addTorus,
-            'addCylinder': addCylinder,
-            'moveX': moveX,
-            'addHexagon': addHexagon,
-            'addMetaballs': addMetaballs,
-            'addCubes': addCubes,
-            'addCSG': addCSG,
-        }
+        const registry = Object.fromEntries([
+            addSphere,
+            addCube,
+            addCone,
+            addTorus,
+            addCylinder,
+            moveX,
+            addHexagon,
+            addMetaballs,
+            addCubes,
+            addCSG,
+        ].map($ => [$.name, $]));
 
         document.querySelectorAll('button[data-function]').forEach(button => {
             button.addEventListener('click', function() {
                 const functionName = this.getAttribute('data-function');
                 console.log(functionName);
-                functions[functionName]();
+                registry[functionName]();
             });
         });
 
