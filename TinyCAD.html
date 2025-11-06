@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TinyCAD</title>
+    <style>
+        body {
+            margin: 0;
+        }
+        canvas {
+            display: block;
+        }
+        #controls {
+            position: relative;
+            top: 10px;
+            left: 10px;
+            background-color: #eee;
+            display: inline-block;
+            padding: 5px;
+        }
+        button {
+            height: 30px;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <button data-function="addSphere">Add Sphere</button>
+        <button data-function="addCube">Add Cube</button>
+        <button data-function="addCone">Add Cone</button>
+        <button data-function="addTorus">Add Torus</button>
+        <button data-function="addCylinder">Add Cylinder</button>
+        <button data-function="moveX">X+1</button>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        const raycaster = new THREE.Raycaster();
+
+        renderer.setClearColor(0xffffff);
+        document.body.appendChild(renderer.domElement);
+
+        const objects = [];
+        let selectedObject = null;
+
+        // Grid
+
+        const gridSize = 20;
+        const gridDivisions = 20;
+        const gridHelper = new THREE.GridHelper(gridSize, gridDivisions, 0x333333, 0xcccccc);
+        scene.add(gridHelper);
+
+        // X/Y/Z-Axis
+
+        function createLine(color, start, end) {
+            const material = new THREE.LineBasicMaterial({ color: color });
+            const geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
+            const line = new THREE.Line(geometry, material);
+            return line;
+        }
+
+        const xAxis = createLine(0xff0000, new THREE.Vector3(0, 0, 0), new THREE.Vector3(5, 0, 0));
+        scene.add(xAxis);
+
+        const yAxis = createLine(0x00ff00, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 5, 0));
+        scene.add(yAxis);
+
+        const zAxis = createLine(0x0000ff, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 5));
+        scene.add(zAxis);
+
+        function addSphere() {
+            const geometry = new THREE.SphereGeometry(1, 32, 32);
+            const material = new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.name = 'Sphere';
+            scene.add(mesh);
+            objects.push(mesh);
+        }
+
+        function addCube() {
+            const geometry = new THREE.BoxGeometry(1, 1, 1);
+            const material = new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.name = 'Cube';
+            scene.add(mesh);
+            objects.push(mesh);
+        }
+
+        function addCone() {
+            const geometry = new THREE.ConeGeometry(0.5, 1, 32);
+            const material = new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.name = 'Cone';
+            scene.add(mesh);
+            objects.push(mesh);
+        }
+
+        function addTorus() {
+            const geometry = new THREE.TorusGeometry(1, 0.4, 16, 100);
+            const material = new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.name = 'Torus';
+            scene.add(mesh);
+            objects.push(mesh);
+        }
+
+        function addCylinder() {
+            const geometry = new THREE.CylinderGeometry(0.5, 0.5, 1, 32);
+            const material = new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.name = 'Cylinder';
+            scene.add(mesh);
+            objects.push(mesh);
+        }
+
+        function moveX() {
+            if (selectedObject != null) {
+                selectedObject.position.x += 1;
+            }
+        }
+
+        // Camera
+
+        camera.position.set(5.0, 5.0, 5.0);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.screenSpacePanning = false;
+        controls.minDistance = 1.0;
+        controls.maxDistance = 100.0;
+
+        // Resize
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        window.addEventListener('resize', onWindowResize);
+        onWindowResize();
+
+        // UI
+
+        const functions = {
+            'addSphere': addSphere,
+            'addCube': addCube,
+            'addCone': addCone,
+            'addTorus': addTorus,
+            'addCylinder': addCylinder,
+            'moveX': moveX,
+        }
+
+        document.querySelectorAll('button[data-function]').forEach(button => {
+            button.addEventListener('click', function() {
+                const functionName = this.getAttribute('data-function');
+                console.log(functionName);
+                functions[functionName]();
+            });
+        });
+
+        function onMouseClick(event) {
+            const mouse = new THREE.Vector2();
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = (-event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            const intersects = raycaster.intersectObjects(objects);
+
+            if (intersects.length > 0) {
+                selectedObject = intersects[0].object;
+                console.log('Selected object position:', selectedObject);
+            }
+        }
+
+        window.addEventListener('click', onMouseClick);
+
+        // Render
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update(); // Required when damping is enabled
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
