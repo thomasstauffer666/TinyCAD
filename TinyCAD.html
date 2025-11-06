@@ -22,6 +22,54 @@
         button {
             height: 30px;
         }
+        /* Mode toggle styles */
+        .mode-btn {
+            border: 1px solid #bbb;
+            background: #f6f6f6;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .mode-btn.active {
+            background: #1976d2;
+            color: #fff;
+            border-color: #1976d2;
+        }
+        /* Drawing modal styles */
+        #drawModal {
+            position: fixed;
+            inset: 0;
+            display: none; /* shown via JS */
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.45);
+            z-index: 9999;
+        }
+        #drawModal .modal-content {
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+            padding: 16px;
+            max-width: 90vw;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        #drawCanvas {
+            background: #fafafa;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            touch-action: none; /* for pointer/touch drawing */
+        }
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+        .modal-actions button {
+            min-width: 80px;
+        }
     </style>
 </head>
 <body>
@@ -32,6 +80,25 @@
         <button data-function="addTorus">Add Torus</button>
         <button data-function="addCylinder">Add Cylinder</button>
         <button data-function="moveX">X+1</button>
+        <button data-function="openDrawModal">Free Draw</button>
+    </div>
+
+    <!-- Center popup for free-form drawing -->
+    <div id="drawModal" aria-hidden="true">
+        <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="drawModalTitle">
+            <h3 id="drawModalTitle" style="margin:0 0 8px;">Free-form drawing</h3>
+            <div class="mode-toggle" style="display:flex; gap:8px; align-items:center;">
+                <span style="font-size: 0.9em; color:#555;">Mode:</span>
+                <button id="modeDrawBtn" class="mode-btn active" type="button">Draw</button>
+                <button id="modeSubtractBtn" class="mode-btn" type="button">Subtract</button>
+            </div>
+            <canvas id="drawCanvas" width="800" height="500" style="width: 800px; height: 500px;"></canvas>
+            <div class="modal-actions">
+                <button id="drawCancelBtn" type="button">Cancel</button>
+                <button id="drawClearBtn" type="button">Clear</button>
+                <button id="drawApplyBtn" type="button">Apply</button>
+            </div>
+        </div>
     </div>
 
     <script type="importmap">
@@ -46,6 +113,7 @@
     <script type="module">
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import martinez from 'https://esm.sh/martinez-polygon-clipping@0.7.2';
 
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -151,11 +219,523 @@
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
+            // Keep drawing canvas crisp if modal is open
+            const modal = document.getElementById('drawModal');
+            if (modal && modal.getAttribute('aria-hidden') === 'false') {
+                // sizeDrawCanvasForDPR is defined below
+                if (typeof sizeDrawCanvasForDPR === 'function') sizeDrawCanvasForDPR();
+            }
         }
         window.addEventListener('resize', onWindowResize);
         onWindowResize();
 
         // UI
+
+        // Drawing modal logic
+        const drawModal = document.getElementById('drawModal');
+        const drawCanvas = document.getElementById('drawCanvas');
+        const drawCancelBtn = document.getElementById('drawCancelBtn');
+        const drawApplyBtn = document.getElementById('drawApplyBtn');
+        const drawClearBtn = document.getElementById('drawClearBtn');
+        const modeDrawBtn = document.getElementById('modeDrawBtn');
+        const modeSubtractBtn = document.getElementById('modeSubtractBtn');
+        let drawMode = 'draw'; // 'draw' | 'subtract'
+        let isDrawing = false;
+        let lastX = 0, lastY = 0;
+        let startX = 0, startY = 0;
+        let strokeLen = 0;
+        let currentStroke = [];
+        // Store completed closed polygons from each stroke end
+        // Each entry: { points: [{x,y},...], mode: 'draw'|'subtract' }
+        const completedPolygons = [];
+        let preStrokeImage = null; // snapshot of canvas before current stroke (for preview & apply-on-end)
+        const CLOSE_DISTANCE_PX = 2;
+
+        function sizeDrawCanvasForDPR() {
+            if (!drawCanvas) return;
+            const dpr = window.devicePixelRatio || 1;
+            const rect = drawCanvas.getBoundingClientRect();
+            drawCanvas.width = Math.max(1, Math.floor(rect.width * dpr));
+            drawCanvas.height = Math.max(1, Math.floor(rect.height * dpr));
+            const ctx = drawCanvas.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#111';
+            ctx.fillStyle = '#000';
+            ctx.globalCompositeOperation = 'source-over';
+            // Clear background
+            ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+        }
+
+        function openDrawModal() {
+            drawModal.style.display = 'flex';
+            drawModal.setAttribute('aria-hidden', 'false');
+            // Delay sizing to next frame to ensure layout settled
+            requestAnimationFrame(() => {
+                sizeDrawCanvasForDPR();
+            });
+        }
+        function closeDrawModal() {
+            drawModal.style.display = 'none';
+            drawModal.setAttribute('aria-hidden', 'true');
+        }
+
+        function getCanvasPos(e) {
+            const rect = drawCanvas.getBoundingClientRect();
+            const isTouch = e.touches && e.touches.length;
+            const clientX = isTouch ? e.touches[0].clientX : (e.clientX ?? 0);
+            const clientY = isTouch ? e.touches[0].clientY : (e.clientY ?? 0);
+            return {
+                x: clientX - rect.left,
+                y: clientY - rect.top
+            };
+        }
+
+        function startDraw(e) {
+            isDrawing = true;
+            const ctx = drawCanvas.getContext('2d');
+            // Snapshot the canvas before starting a new stroke (used for subtract preview and commit)
+            try {
+                preStrokeImage = ctx.getImageData(0, 0, drawCanvas.width, drawCanvas.height);
+            } catch (err) {
+                preStrokeImage = null;
+            }
+            const { x, y } = getCanvasPos(e);
+            lastX = x; lastY = y;
+            startX = x; startY = y;
+            strokeLen = 0;
+            currentStroke = [{ x, y }];
+            e.preventDefault();
+        }
+        function drawMove(e) {
+            if (!isDrawing) return;
+            const ctx = drawCanvas.getContext('2d');
+            const { x, y } = getCanvasPos(e);
+
+            if (drawMode === 'subtract' && preStrokeImage) {
+                // Preview subtract shape without permanently drawing over the base
+                ctx.putImageData(preStrokeImage, 0, 0);
+                // Draw the preview of the polygonal path
+                ctx.save();
+                ctx.setLineDash([6, 4]);
+                ctx.strokeStyle = '#c00';
+                ctx.beginPath();
+                if (currentStroke.length) {
+                    ctx.moveTo(currentStroke[0].x, currentStroke[0].y);
+                    for (let i = 1; i < currentStroke.length; i++) {
+                        ctx.lineTo(currentStroke[i].x, currentStroke[i].y);
+                    }
+                    ctx.lineTo(x, y);
+                } else {
+                    ctx.moveTo(lastX, lastY);
+                    ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                ctx.restore();
+            } else {
+                // Normal draw mode: incrementally stroke
+                ctx.beginPath();
+                ctx.moveTo(lastX, lastY);
+                ctx.lineTo(x, y);
+                ctx.stroke();
+            }
+
+            // Accumulate stroke length for tap/noise filtering
+            const dx = x - lastX;
+            const dy = y - lastY;
+            strokeLen += Math.hypot(dx, dy);
+            lastX = x; lastY = y;
+            // record point for polygonal fill/erase on end
+            currentStroke.push({ x, y });
+            e.preventDefault();
+        }
+        function endDraw(e) {
+            if (!isDrawing) { e.preventDefault(); return; }
+            const ctx = drawCanvas.getContext('2d');
+
+            // Determine if we should treat this as a closed polygon
+            const distToStart = Math.hypot(lastX - startX, lastY - startY);
+            const shouldClose = strokeLen > CLOSE_DISTANCE_PX && distToStart > 0;
+
+            // Build a closed polygon path from the captured points
+            let path = null;
+            if (shouldClose && currentStroke && currentStroke.length >= 3) {
+                path = new Path2D();
+                const first = currentStroke[0];
+                path.moveTo(first.x, first.y);
+                for (let i = 1; i < currentStroke.length; i++) {
+                    const p = currentStroke[i];
+                    path.lineTo(p.x, p.y);
+                }
+                path.closePath();
+            }
+
+            // Restore canvas to pre-stroke image to avoid overlayed outlines
+            if (preStrokeImage) {
+                ctx.putImageData(preStrokeImage, 0, 0);
+            }
+
+            if (path) {
+                // Record this closed polygon with its mode for later extrusion
+                completedPolygons.push({ points: currentStroke.slice(), mode: drawMode });
+
+                if (drawMode === 'subtract') {
+                    // Apply subtraction only once the stroke is finished; create a new complete form
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'destination-out';
+                    ctx.fill(path);
+                    ctx.restore();
+                } else {
+                    // Draw mode: produce a solid filled region (complete form)
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.fillStyle = '#000';
+                    ctx.fill(path, 'nonzero');
+                    ctx.restore();
+                }
+            } else {
+                // If the path wasn't valid (e.g., tap), re-apply the incremental stroke for draw mode
+                if (drawMode !== 'subtract' && preStrokeImage) {
+                    // nothing extra; canvas already restored
+                }
+            }
+
+            // Reset state
+            isDrawing = false;
+            currentStroke = [];
+            preStrokeImage = null;
+            e.preventDefault();
+        }
+
+        // Pointer/mouse/touch listeners
+        drawCanvas.addEventListener('mousedown', startDraw);
+        drawCanvas.addEventListener('mousemove', drawMove);
+        window.addEventListener('mouseup', endDraw);
+        drawCanvas.addEventListener('touchstart', startDraw, { passive: false });
+        drawCanvas.addEventListener('touchmove', drawMove, { passive: false });
+        window.addEventListener('touchend', endDraw, { passive: false });
+
+        // Utility: Clear the drawing canvas and reset state
+        function clearDrawing() {
+            const ctx = drawCanvas.getContext('2d');
+            // Reset interaction state
+            isDrawing = false;
+            currentStroke = [];
+            preStrokeImage = null;
+            // Clear the canvas content (respect device pixel ratio transform)
+            const dpr = window.devicePixelRatio || 1;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+            // Restore default drawing styles
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#111';
+            ctx.fillStyle = '#000';
+        }
+
+        // Buttons
+        drawCancelBtn.addEventListener('click', () => {
+            // Reset collected polygons and close
+            completedPolygons.length = 0;
+            closeDrawModal();
+        });
+        drawClearBtn.addEventListener('click', () => {
+            // Also reset collected polygons
+            completedPolygons.length = 0;
+            clearDrawing();
+        });
+
+        // Convert a 2D polygon to a 3D extruded mesh (single outline, no holes)
+        function extrude2DTo3D(coordinates, height) {
+            const material = new THREE.MeshBasicMaterial({
+                color: Math.random() * 0xffffff,
+                side: THREE.DoubleSide,
+            });
+            const shape = new THREE.Shape();
+            shape.moveTo(coordinates[0][0], coordinates[0][1]);
+            for (let i = 1; i < coordinates.length; i++) {
+                shape.lineTo(coordinates[i][0], coordinates[i][1]);
+            }
+            shape.lineTo(coordinates[0][0], coordinates[0][1]);
+            const extrudeSettings = {
+                depth: height,
+                bevelEnabled: false
+            };
+            const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+            const mesh = new THREE.Mesh(geometry, material);
+            return mesh;
+        }
+
+        // Utilities for polygons captured from the canvas
+        function pointInPolygon(point, polygon) { // point: {x,y}, polygon: [{x,y}, ...]
+            // Ray-casting algorithm
+            let inside = false;
+            for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+                const xi = polygon[i].x, yi = polygon[i].y;
+                const xj = polygon[j].x, yj = polygon[j].y;
+                const intersect = ((yi > point.y) !== (yj > point.y)) &&
+                    (point.x < (xj - xi) * (point.y - yi) / ((yj - yi) || 1e-9) + xi);
+                if (intersect) inside = !inside;
+            }
+            return inside;
+        }
+        function polygonContainsPolygon(outer, inner) {
+            // Conservative: require ALL points inside outer
+            if (!inner || inner.length === 0) return false;
+            for (let k = 0; k < inner.length; k++) {
+                if (!pointInPolygon(inner[k], outer)) return false;
+            }
+            return true;
+        }
+
+        function getLatestOuterAndHoles() {
+            if (!completedPolygons.length) return null;
+            // Find the latest primary (draw) polygon
+            let outerIndex = -1;
+            for (let i = completedPolygons.length - 1; i >= 0; i--) {
+                if (completedPolygons[i].mode === 'draw') { outerIndex = i; break; }
+            }
+            if (outerIndex === -1) {
+                // Fallback: use the last polygon of any type as outer
+                outerIndex = completedPolygons.length - 1;
+            }
+            const outer = completedPolygons[outerIndex].points;
+            // Holes: any subtract polygons fully inside the outer
+            const holes = [];
+            for (let i = 0; i < completedPolygons.length; i++) {
+                if (i === outerIndex) continue;
+                const poly = completedPolygons[i];
+                if (poly.mode !== 'subtract') continue;
+                if (polygonContainsPolygon(outer, poly.points)) holes.push(poly.points);
+            }
+            return { outer, holes };
+        }
+
+        function canvasPolygonToWorldCoords(points) {
+            // Map canvas pixel coords to world XY units, then we'll rotate to lie on XZ grid
+            const rect = drawCanvas.getBoundingClientRect();
+            const cx = rect.width / 2;
+            const cy = rect.height / 2;
+            const scale = 0.01; // 1 px = 0.01 world units
+            const coords = points.map(p => {
+                const x = (p.x - cx) * scale;
+                const y = (cy - p.y) * scale; // invert Y so up is positive
+                return [x, y];
+            });
+            return coords;
+        }
+
+        function extrudeWithHoles(outerCoords, holesCoordsArray, height) {
+            // Ensure proper windings: outer CCW, holes CW
+            const toVec2 = arr => arr.map(([x, y]) => new THREE.Vector2(x, y));
+            let outer = outerCoords.slice();
+            const outerVecs = toVec2(outer);
+            if (THREE.ShapeUtils.isClockWise(outerVecs)) outer.reverse();
+
+            const shape = new THREE.Shape();
+            shape.moveTo(outer[0][0], outer[0][1]);
+            for (let i = 1; i < outer.length; i++) shape.lineTo(outer[i][0], outer[i][1]);
+            shape.lineTo(outer[0][0], outer[0][1]);
+
+            for (const holeCoords of holesCoordsArray) {
+                let hole = holeCoords.slice();
+                const holeVecs = toVec2(hole);
+                // holes must be clockwise when outer is CCW
+                if (!THREE.ShapeUtils.isClockWise(holeVecs)) hole.reverse();
+                const path = new THREE.Path();
+                path.moveTo(hole[0][0], hole[0][1]);
+                for (let i = 1; i < hole.length; i++) path.lineTo(hole[i][0], hole[i][1]);
+                path.lineTo(hole[0][0], hole[0][1]);
+                shape.holes.push(path);
+            }
+
+            const extrudeSettings = { depth: height, bevelEnabled: false };
+            const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+            const material = new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff, side: THREE.DoubleSide });
+            return new THREE.Mesh(geometry, material);
+        }
+
+        function getLastPolygonPoints() {
+            if (!completedPolygons.length) return null;
+            // Prefer the last 'draw' polygon; if none, use the last polygon of any type
+            for (let i = completedPolygons.length - 1; i >= 0; i--) {
+                if (completedPolygons[i].mode === 'draw') return completedPolygons[i].points;
+            }
+            return completedPolygons[completedPolygons.length - 1].points;
+        }
+
+        drawApplyBtn.addEventListener('click', () => {
+            // Helper: ensure ring is closed and free of duplicate consecutive points
+            function toClosedRing(points) {
+                const ring = [];
+                for (let i = 0; i < points.length; i++) {
+                    const p = points[i];
+                    if (!ring.length || ring[ring.length - 1][0] !== p.x || ring[ring.length - 1][1] !== p.y) {
+                        ring.push([p.x, p.y]);
+                    }
+                }
+                // need at least 3 distinct points
+                if (ring.length < 3) return null;
+                const first = ring[0];
+                const last = ring[ring.length - 1];
+                if (first[0] !== last[0] || first[1] !== last[1]) ring.push([first[0], first[1]]);
+                return ring;
+            }
+            function ringArea(ring) {
+                let a = 0;
+                for (let i = 0; i < ring.length - 1; i++) {
+                    const [x1, y1] = ring[i];
+                    const [x2, y2] = ring[i + 1];
+                    a += (x1 * y2 - x2 * y1);
+                }
+                return a / 2;
+            }
+            function ringValid(ring) {
+                return ring && ring.length >= 4 && Math.abs(ringArea(ring)) > 1e-2; // closed ring has >=4 entries
+            }
+            function pxRingToWorldXY(ring) {
+                const rect = drawCanvas.getBoundingClientRect();
+                const cx = rect.width / 2;
+                const cy = rect.height / 2;
+                const scale = 0.01;
+                return ring.slice(0, -1).map(([x, y]) => [ (x - cx) * scale, (cy - y) * scale ]);
+            }
+
+            // Build subject (outer) from the latest draw polygon
+            let outerPoints = null;
+            for (let i = completedPolygons.length - 1; i >= 0; i--) {
+                if (completedPolygons[i].mode === 'draw') { outerPoints = completedPolygons[i].points; break; }
+            }
+            if (!outerPoints) outerPoints = completedPolygons.length ? completedPolygons[completedPolygons.length - 1].points : null;
+            if (!outerPoints || outerPoints.length < 3) {
+                console.warn('No valid outer polygon to extrude. Draw a closed shape first.');
+                return;
+            }
+
+            const subjectRing = toClosedRing(outerPoints);
+            if (!ringValid(subjectRing)) {
+                console.warn('Outer polygon is degenerate.');
+                return;
+            }
+            // Martinez expects MultiPolygon or Polygon; we start with Polygon = [ring]
+            let resultMP = [ [ subjectRing ] ];
+
+            // Collect all subtract polygons (regardless of containment)
+            const subtractPolys = completedPolygons.filter(p => p.mode === 'subtract');
+
+            const height = 0.5; // default extrusion height in world units
+
+            const canBoolean = !!(martinez && typeof martinez.diff === 'function');
+            if (canBoolean && subtractPolys.length) {
+                try {
+                    // Apply difference iteratively: ((subject - clip1) - clip2) - ...
+                    for (const sp of subtractPolys) {
+                        const clipRing = toClosedRing(sp.points);
+                        if (!ringValid(clipRing)) continue;
+                        const clipPoly = [ [ clipRing ] ];
+                        resultMP = martinez.diff(resultMP, clipPoly);
+                        // If fully erased
+                        if (!resultMP || !resultMP.length) break;
+                    }
+
+                    if (!resultMP || !resultMP.length) {
+                        console.warn('Subtraction removed the entire shape; nothing to extrude.');
+                        return;
+                    }
+
+                    // Convert MultiPolygon result into meshes
+                    const group = new THREE.Group();
+                    group.name = 'ExtrudedShape';
+
+                    let polyCount = 0;
+                    let ringCounts = [];
+
+                    for (const polygon of resultMP) { // polygon: Array<Ring>
+                        if (!polygon || !polygon.length) continue;
+                        const outer = polygon[0];
+                        if (!ringValid(outer)) continue;
+                        const holes = polygon.slice(1).filter(r => ringValid(r));
+
+                        // Map to world and enforce windings
+                        const outerWorld = pxRingToWorldXY(outer);
+                        const holesWorld = holes.map(pxRingToWorldXY);
+
+                        // Build mesh for this polygon
+                        const mesh = extrudeWithHoles(outerWorld, holesWorld, height);
+                        group.add(mesh);
+                    }
+
+                    if (group.children.length === 0) {
+                        console.warn('No valid geometry produced after subtraction.');
+                        return;
+                    }
+
+                    // Orient and add to scene
+                    group.rotation.x = -Math.PI / 2;
+                    group.position.set(0, 0, 0);
+                    scene.add(group);
+                    objects.push(group);
+
+                    console.log('Extruded shape(s) created from boolean diff:', {
+                        polygons: resultMP.length
+                    });
+
+                    // Reset drawing state, close modal
+                    completedPolygons.length = 0;
+                    clearDrawing();
+                    closeDrawModal();
+                    return;
+                } catch (e) {
+                    console.warn('Boolean subtraction failed, falling back to hole-only path.', e);
+                }
+            }
+
+            // Fallback: original hole-only behavior
+            const group = getLatestOuterAndHoles();
+            if (!group || !group.outer || group.outer.length < 3) {
+                console.warn('No valid outer polygon to extrude. Draw a closed shape first.');
+                return;
+            }
+            const outerWorld = canvasPolygonToWorldCoords(group.outer);
+            const holesWorld = (group.holes || []).map(h => canvasPolygonToWorldCoords(h));
+            const mesh = extrudeWithHoles(outerWorld, holesWorld, height);
+            mesh.rotation.x = -Math.PI / 2;
+            mesh.position.set(0, 0, 0);
+            mesh.name = 'ExtrudedShape';
+            scene.add(mesh);
+            objects.push(mesh);
+            console.log('Extruded shape created from canvas polygons (fallback):', {
+                outerPoints: group.outer.length,
+                holes: holesWorld.length,
+                holePoints: holesWorld.map(h => h.length)
+            });
+
+            completedPolygons.length = 0;
+            clearDrawing();
+            closeDrawModal();
+        });
+
+        // Mode toggle logic
+        function setDrawMode(mode) {
+            drawMode = mode === 'subtract' ? 'subtract' : 'draw';
+            if (modeDrawBtn && modeSubtractBtn) {
+                if (drawMode === 'draw') {
+                    modeDrawBtn.classList.add('active');
+                    modeSubtractBtn.classList.remove('active');
+                } else {
+                    modeSubtractBtn.classList.add('active');
+                    modeDrawBtn.classList.remove('active');
+                }
+            }
+        }
+        if (modeDrawBtn) modeDrawBtn.addEventListener('click', () => setDrawMode('draw'));
+        if (modeSubtractBtn) modeSubtractBtn.addEventListener('click', () => setDrawMode('subtract'));
+        // Ensure default mode on open
+        setDrawMode('draw');
 
         const functions = {
             'addSphere': addSphere,
@@ -164,6 +744,7 @@
             'addTorus': addTorus,
             'addCylinder': addCylinder,
             'moveX': moveX,
+            'openDrawModal': openDrawModal,
         }
 
         document.querySelectorAll('button[data-function]').forEach(button => {
@@ -175,6 +756,10 @@
         });
 
         function onMouseClick(event) {
+            // Ignore scene clicks while modal is open
+            const dm = document.getElementById('drawModal');
+            if (dm && dm.getAttribute('aria-hidden') === 'false') return;
+
             const mouse = new THREE.Vector2();
 
             mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
